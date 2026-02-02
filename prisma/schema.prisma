@@ -1,0 +1,89 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  externalId String? @unique @map("external_id") // ID from Moltbook API
+  content   String
+  title     String?
+  author    String?
+  authorId  String?  @map("author_id")
+  url       String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Vector embedding for semantic search (1536 dimensions for text-embedding-3-small)
+  embedding Unsupported("vector(1536)")?
+
+  // Position in 3D space (cached for performance)
+  posX      Float?   @map("pos_x")
+  posY      Float?   @map("pos_y")
+  posZ      Float?   @map("pos_z")
+
+  // Relations
+  topics    PostTopic[]
+
+  @@map("posts")
+}
+
+model Topic {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  color       String   @default("#3b82f6") // Tailwind blue-500
+
+  // Centroid embedding for the cluster
+  centroidEmbedding Unsupported("vector(1536)")? @map("centroid_embedding")
+
+  // Position in 3D space (cached)
+  posX        Float?   @map("pos_x")
+  posY        Float?   @map("pos_y")
+  posZ        Float?   @map("pos_z")
+
+  // Cluster size (cached count)
+  postCount   Int      @default(0) @map("post_count")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  posts       PostTopic[]
+
+  @@map("topics")
+}
+
+model PostTopic {
+  id        String   @id @default(cuid())
+  postId    String   @map("post_id")
+  topicId   String   @map("topic_id")
+  relevance Float    @default(1.0) // How relevant is this post to the topic (0-1)
+
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  topic     Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, topicId])
+  @@map("post_topics")
+}
+
+// Track ingestion jobs
+model IngestionJob {
+  id          String   @id @default(cuid())
+  status      String   @default("pending") // pending, running, completed, failed
+  totalItems  Int      @default(0) @map("total_items")
+  processed   Int      @default(0)
+  errors      Int      @default(0)
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  errorLog    String?   @map("error_log")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("ingestion_jobs")
+}
