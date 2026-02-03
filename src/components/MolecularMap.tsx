@@ -167,19 +167,19 @@ function ConnectionLines({
 }) {
   if (!topicNode) return null;
 
-  const points = posts.flatMap((post) => [
-    new THREE.Vector3(topicNode.x, topicNode.y, topicNode.z),
-    new THREE.Vector3(post.x, post.y, post.z),
-  ]);
+  const positions = new Float32Array(
+    posts.flatMap((post) => [
+      topicNode.x, topicNode.y, topicNode.z,
+      post.x, post.y, post.z,
+    ])
+  );
 
   return (
     <lineSegments>
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
-          count={points.length}
-          array={new Float32Array(points.flatMap((p) => [p.x, p.y, p.z]))}
-          itemSize={3}
+          args={[positions, 3]}
         />
       </bufferGeometry>
       <lineBasicMaterial color="#4b5563" opacity={0.3} transparent />
