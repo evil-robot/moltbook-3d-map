@@ -87,24 +87,18 @@ async function fetchAllPosts(
   totalLimit: number
 ): Promise<MoltbookPost[]> {
   const allPosts: MoltbookPost[] = [];
-  let page = 1;
-  let cursor: string | null = null;
+  let beforeDate: string | null = null;
 
-  console.log(`📥 Fetching up to ${totalLimit} posts from Moltbook...`);
+  console.log(`📥 Fetching up to ${totalLimit} posts from Moltbook using date-based pagination...`);
 
   while (allPosts.length < totalLimit) {
     const remaining = totalLimit - allPosts.length;
     const fetchLimit = Math.min(MOLTBOOK_PAGE_SIZE, remaining);
 
-    // Try different pagination strategies
+    // Use date-based pagination - fetch posts created before the oldest one we have
     let url = `${baseUrl}?sort=new&limit=${fetchLimit}`;
-
-    // Try cursor-based pagination first (most common in modern APIs)
-    if (cursor) {
-      url += `&cursor=${cursor}`;
-    } else if (page > 1) {
-      // Fallback to page-based pagination
-      url += `&page=${page}`;
+    if (beforeDate) {
+      url += `&before=${encodeURIComponent(beforeDate)}`;
     }
 
     console.log(`   📡 Requesting: ${url}`);
@@ -122,7 +116,7 @@ async function fetchAllPosts(
     const data = await response.json();
     const posts = data.posts || data.data || [];
 
-    console.log(`   📦 Response: ${posts.length} posts, has_more=${data.has_more}, next_cursor=${data.next_cursor || data.cursor || 'none'}`);
+    console.log(`   📦 Response: ${posts.length} posts`);
 
     if (posts.length === 0) {
       console.log(`   ⚠️ No more posts returned, stopping pagination`);
@@ -139,25 +133,21 @@ async function fetchAllPosts(
     }
 
     allPosts.push(...newPosts);
-    page++;
 
-    // Update cursor for next request
-    cursor = data.next_cursor || data.cursor || null;
-
-    console.log(`   ✅ Total: ${allPosts.length}/${totalLimit} posts (${newPosts.length} new)`);
-
-    // Check various pagination end conditions
-    const hasMore = data.has_more !== false &&
-                    data.has_next !== false &&
-                    posts.length >= fetchLimit;
-
-    if (!hasMore && !cursor) {
-      console.log(`   🏁 No more pages indicated by API`);
+    // Get the oldest post's created_at for next pagination
+    const oldestPost = posts[posts.length - 1];
+    if (oldestPost && oldestPost.created_at) {
+      beforeDate = oldestPost.created_at;
+      console.log(`   📅 Next batch: fetching posts before ${beforeDate}`);
+    } else {
+      console.log(`   ⚠️ No created_at found, stopping pagination`);
       break;
     }
 
+    console.log(`   ✅ Total: ${allPosts.length}/${totalLimit} posts (${newPosts.length} new)`);
+
     // Small delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
   console.log(`✅ Fetched ${allPosts.length} posts total`);
