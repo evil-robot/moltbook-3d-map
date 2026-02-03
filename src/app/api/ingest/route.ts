@@ -87,19 +87,16 @@ async function fetchAllPosts(
   totalLimit: number
 ): Promise<MoltbookPost[]> {
   const allPosts: MoltbookPost[] = [];
-  let beforeDate: string | null = null;
+  let offset = 0;
 
-  console.log(`📥 Fetching up to ${totalLimit} posts from Moltbook using date-based pagination...`);
+  console.log(`📥 Fetching up to ${totalLimit} posts from Moltbook using offset pagination...`);
 
   while (allPosts.length < totalLimit) {
     const remaining = totalLimit - allPosts.length;
     const fetchLimit = Math.min(MOLTBOOK_PAGE_SIZE, remaining);
 
-    // Use date-based pagination - fetch posts created before the oldest one we have
-    let url = `${baseUrl}?sort=new&limit=${fetchLimit}`;
-    if (beforeDate) {
-      url += `&before=${encodeURIComponent(beforeDate)}`;
-    }
+    // Use offset-based pagination
+    const url = `${baseUrl}?sort=new&limit=${fetchLimit}&offset=${offset}`;
 
     console.log(`   📡 Requesting: ${url}`);
 
@@ -116,7 +113,7 @@ async function fetchAllPosts(
     const data = await response.json();
     const posts = data.posts || data.data || [];
 
-    console.log(`   📦 Response: ${posts.length} posts`);
+    console.log(`   📦 Response: ${posts.length} posts at offset ${offset}`);
 
     if (posts.length === 0) {
       console.log(`   ⚠️ No more posts returned, stopping pagination`);
@@ -133,21 +130,12 @@ async function fetchAllPosts(
     }
 
     allPosts.push(...newPosts);
-
-    // Get the oldest post's created_at for next pagination
-    const oldestPost = posts[posts.length - 1];
-    if (oldestPost && oldestPost.created_at) {
-      beforeDate = oldestPost.created_at;
-      console.log(`   📅 Next batch: fetching posts before ${beforeDate}`);
-    } else {
-      console.log(`   ⚠️ No created_at found, stopping pagination`);
-      break;
-    }
+    offset += posts.length;
 
     console.log(`   ✅ Total: ${allPosts.length}/${totalLimit} posts (${newPosts.length} new)`);
 
     // Small delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
 
   console.log(`✅ Fetched ${allPosts.length} posts total`);
