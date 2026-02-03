@@ -5,6 +5,9 @@ import { kMeansClustering, embedTo3D, getTopicColor } from "@/lib/clustering";
 
 const BATCH_SIZE = 100; // Process embeddings in batches
 const MOLTBOOK_PAGE_SIZE = 100; // Posts per API call
+const MAX_OFFSET = 800; // Moltbook API fails above ~1000 offset
+const REQUEST_DELAY = 500; // ms between API calls
+const MAX_RETRIES = 3; // Retry failed requests
 
 // Endpoint to trigger data ingestion from Moltbook API
 export async function POST(request: NextRequest) {
@@ -81,6 +84,47 @@ interface MoltbookPost {
   submolt: { id: string; name: string; display_name: string };
 }
 
+async function fetchWithRetry(
+  url: string,
+  apiKey: string,
+  retries: number = MAX_RETRIES
+): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+
+      // Check for API-level errors in response
+      if (response.ok) {
+        const cloned = response.clone();
+        const data = await cloned.json();
+        if (data.success === false) {
+          throw new Error(data.error || 'API returned success: false');
+        }
+        // Return original response for further processing
+        return response;
+      }
+
+      if (response.status >= 500 && attempt < retries) {
+        console.log(`   ⚠️ Server error (${response.status}), retrying in ${attempt * 2}s...`);
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      if (attempt < retries) {
+        console.log(`   ⚠️ Request failed, retrying in ${attempt * 2}s... (${error})`);
+        await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
 async function fetchAllPosts(
   baseUrl: string,
   apiKey: string,
@@ -89,53 +133,67 @@ async function fetchAllPosts(
   const allPosts: MoltbookPost[] = [];
   let offset = 0;
 
-  console.log(`📥 Fetching up to ${totalLimit} posts from Moltbook using offset pagination...`);
+  // Cap the limit based on API's offset restrictions
+  const effectiveLimit = Math.min(totalLimit, MAX_OFFSET + MOLTBOOK_PAGE_SIZE);
 
-  while (allPosts.length < totalLimit) {
-    const remaining = totalLimit - allPosts.length;
+  console.log(`📥 Fetching up to ${effectiveLimit} posts from Moltbook (API offset limit: ${MAX_OFFSET})...`);
+  if (totalLimit > effectiveLimit) {
+    console.log(`   ⚠️ Requested ${totalLimit} but API only supports ~${effectiveLimit} via offset pagination`);
+  }
+
+  while (allPosts.length < effectiveLimit && offset <= MAX_OFFSET) {
+    const remaining = effectiveLimit - allPosts.length;
     const fetchLimit = Math.min(MOLTBOOK_PAGE_SIZE, remaining);
 
     // Use offset-based pagination
     const url = `${baseUrl}?sort=new&limit=${fetchLimit}&offset=${offset}`;
 
-    console.log(`   📡 Requesting: ${url}`);
+    console.log(`   📡 Requesting: offset=${offset}, limit=${fetchLimit}`);
 
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    try {
+      const response = await fetchWithRetry(url, apiKey);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`   ❌ API Error ${response.status}: ${errorText}`);
-      throw new Error(`Moltbook API error: ${response.status}`);
-    }
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`   ❌ API Error ${response.status}: ${errorText}`);
+        // Stop pagination on error rather than failing completely
+        console.log(`   ⚠️ Stopping pagination due to API error`);
+        break;
+      }
 
-    const data = await response.json();
-    const posts = data.posts || data.data || [];
+      const data = await response.json();
+      const posts = data.posts || data.data || [];
 
-    console.log(`   📦 Response: ${posts.length} posts at offset ${offset}`);
+      console.log(`   📦 Got ${posts.length} posts at offset ${offset}`);
 
-    if (posts.length === 0) {
-      console.log(`   ⚠️ No more posts returned, stopping pagination`);
+      if (posts.length === 0) {
+        console.log(`   ⚠️ No more posts returned, stopping pagination`);
+        break;
+      }
+
+      // Filter duplicates by ID
+      const existingIds = new Set(allPosts.map(p => p.id));
+      const newPosts = posts.filter((p: MoltbookPost) => !existingIds.has(p.id));
+
+      if (newPosts.length === 0) {
+        console.log(`   ⚠️ All posts were duplicates, stopping pagination`);
+        break;
+      }
+
+      allPosts.push(...newPosts);
+      offset += posts.length;
+
+      console.log(`   ✅ Total: ${allPosts.length}/${effectiveLimit} posts`);
+
+      // Longer delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY));
+
+    } catch (error) {
+      console.error(`   ❌ Fetch error at offset ${offset}:`, error);
+      // Stop pagination on error rather than failing completely
+      console.log(`   ⚠️ Stopping pagination, will process ${allPosts.length} posts collected so far`);
       break;
     }
-
-    // Filter duplicates by ID
-    const existingIds = new Set(allPosts.map(p => p.id));
-    const newPosts = posts.filter((p: MoltbookPost) => !existingIds.has(p.id));
-
-    if (newPosts.length === 0) {
-      console.log(`   ⚠️ All posts were duplicates, stopping pagination`);
-      break;
-    }
-
-    allPosts.push(...newPosts);
-    offset += posts.length;
-
-    console.log(`   ✅ Total: ${allPosts.length}/${totalLimit} posts (${newPosts.length} new)`);
-
-    // Small delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 100));
   }
 
   console.log(`✅ Fetched ${allPosts.length} posts total`);
