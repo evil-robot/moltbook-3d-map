@@ -24,10 +24,10 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   return response.data.map((d) => d.embedding);
 }
 
-// Extract topics from content using GPT-4
+// Extract topics from content using GPT-5
 export async function extractTopics(content: string): Promise<string[]> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-5-mini",
     messages: [
       {
         role: "system",
@@ -64,7 +64,7 @@ export async function generateClusterLabel(
   const samplePosts = postContents.slice(0, 10).join("\n---\n");
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-5-mini",
     messages: [
       {
         role: "system",

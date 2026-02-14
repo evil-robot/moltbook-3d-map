@@ -15,7 +15,7 @@ A dynamic 3D molecular visualization that organizes Moltbook content by topic, f
 - **Frontend**: Next.js 14, React Three Fiber, Tailwind CSS
 - **3D Rendering**: Three.js via @react-three/fiber + @react-three/drei
 - **Database**: PostgreSQL with pgvector extension
-- **AI**: OpenAI API (text-embedding-3-small + GPT-4o-mini)
+- **AI**: OpenAI API (text-embedding-3-small + GPT-5-mini)
 - **ORM**: Prisma
 
 ## Prerequisites
